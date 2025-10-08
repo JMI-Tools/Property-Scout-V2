@@ -1,7 +1,20 @@
 import React, { useState, useRef } from 'react';
 import { Camera, MapPin, User, Phone, Mail, FileText, Send, X, DollarSign, AlertTriangle } from 'lucide-react';
 
-// Josh's character component
+// Config: API base URL (env override -> production default)
+const API_BASE_URL = (typeof process !== 'undefined' && process.env && process.env.REACT_APP_API_URL)
+  ? process.env.REACT_APP_API_URL
+  : 'https://api.heyjoshbuythis.com/api';
+
+/*
+Backend expectations (for infra team):
+- CORS allowed origins: https://heyjoshbuythis.com and https://app.heyjoshbuythis.com
+- Mailgun domain: mg.heyjoshbuythis.com
+- Email from: ops@heyjoshbuythis.com
+- Email to: acquisitions@heyjoshbuythis.com
+- Endpoint suggested: POST {API_BASE_URL}/leads with JSON body below
+*/
+
 const JoshCharacter = () => (
   <div className="relative">
     <div className="w-32 h-32 bg-gradient-to-br from-purple-600 to-blue-600 rounded-full flex items-center justify-center border-4 border-cyan-400 shadow-lg shadow-cyan-400/50 animate-pulse">
@@ -23,18 +36,16 @@ const PropertyLeadApp = () => {
     situation: '',
     optionalNotes: ''
   });
-  
+
   const [photos, setPhotos] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const fileInputRef = useRef(null);
 
   const handleInputChange = (e) => {
     const { name, value } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: value
-    }));
+    setFormData(prev => ({ ...prev, [name]: value }));
   };
 
   const handlePhotoCapture = (e) => {
@@ -51,18 +62,60 @@ const PropertyLeadApp = () => {
     setPhotos(prev => prev.filter(photo => photo.id !== photoId));
   };
 
+  // Build multipart form payload (supports images)
+  const buildPayload = () => {
+    const fd = new FormData();
+    fd.append('propertyAddress', formData.propertyAddress.trim());
+    fd.append('leadName', formData.leadName.trim());
+    fd.append('leadPhone', formData.leadPhone.trim());
+    fd.append('leadEmail', formData.leadEmail.trim());
+    fd.append('askingPrice', formData.askingPrice.trim());
+    fd.append('situation', formData.situation.trim());
+    fd.append('optionalNotes', formData.optionalNotes.trim());
+
+    photos.forEach((p, idx) => {
+      if (p.file) fd.append('photos', p.file, p.file.name || `photo-${idx}.jpg`);
+    });
+    return fd;
+  };
+
+  const validate = () => {
+    if (!formData.propertyAddress.trim()) return 'Property address is required';
+    if (!formData.leadName.trim()) return 'Lead name is required';
+    if (!formData.leadPhone.trim() && !formData.leadEmail.trim()) return 'Phone or email is required';
+    if (formData.leadEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.leadEmail)) return 'Enter a valid email';
+    return '';
+  };
+
   const handleSubmit = async () => {
+    setErrorMsg('');
+    setShowSuccess(false);
+    const problem = validate();
+    if (problem) {
+      setErrorMsg(problem);
+      return;
+    }
+
     setIsSubmitting(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    setIsSubmitting(false);
-    setShowSuccess(true);
-    
-    // Reset form after 3 seconds
-    setTimeout(() => {
-      setShowSuccess(false);
+    try {
+      const endpoint = `${API_BASE_URL}/leads`;
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        // Let the browser set multipart boundaries
+        body: buildPayload(),
+      });
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `Request failed with ${res.status}`);
+      }
+
+      // Expect JSON { success: true, id, message }
+      const data = await res.json().catch(() => ({}));
+
+      // UI success feedback
+      setShowSuccess(true);
       setFormData({
         propertyAddress: '',
         leadName: '',
@@ -73,163 +126,110 @@ const PropertyLeadApp = () => {
         optionalNotes: ''
       });
       setPhotos([]);
-    }, 3000);
+    } catch (err) {
+      console.error('Submit error:', err);
+      setErrorMsg(typeof err?.message === 'string' ? err.message : 'Failed to send lead. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 via-black to-gray-900 text-white p-4">
-      {/* Success Modal */}
-      {showSuccess && (
-        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 animate-fade-in">
-          <div className="bg-gradient-to-br from-green-600 to-blue-600 p-8 rounded-lg border-4 border-cyan-400 shadow-2xl shadow-cyan-400/50 text-center animate-scale-in">
-            <div className="text-6xl mb-4">✓</div>
-            <h2 className="text-3xl font-bold mb-2">SUCCESS!</h2>
-            <p className="text-xl">Data transmitted to Josh's command center</p>
-          </div>
-        </div>
-      )}
-
-      <div className="max-w-4xl mx-auto">
-        {/* Header with Josh */}
-        <div className="text-center mb-8 space-y-6">
-          <div className="flex justify-center">
+    <div className="min-h-screen bg-gradient-to-b from-black via-gray-900 to-black text-white p-4">
+      <div className="max-w-3xl mx-auto">
+        <div className="bg-black/70 border border-cyan-400 rounded-xl p-6 shadow-lg shadow-cyan-400/20">
+          <div className="flex items-center gap-4 mb-6">
             <JoshCharacter />
+            <div>
+              <h1 className="text-2xl font-extrabold tracking-widest text-cyan-300">PROPERTY SCOUT</h1>
+              <p className="text-sm text-cyan-500">Send leads directly to Josh’s acquisitions inbox</p>
+            </div>
           </div>
-          
-          <div className="space-y-2">
-            <h1 className="text-5xl font-bold bg-gradient-to-r from-cyan-400 to-blue-500 bg-clip-text text-transparent uppercase tracking-wider">
-              Advanced Property Detection System
-            </h1>
-            <p className="text-cyan-400 text-lg font-mono">Initialize lead detection protocol</p>
-          </div>
-        </div>
 
-        {/* Main Form */}
-        <div className="space-y-6">
-          <div className="bg-black/50 backdrop-blur-sm border-2 border-cyan-400 rounded-lg p-8 shadow-2xl shadow-cyan-400/30">
-            {/* Property Address */}
-            <div className="bg-black/90 border border-cyan-400 rounded-lg p-4 shadow-lg shadow-cyan-400/30 mb-6">
-              <label className="block text-lg font-bold text-cyan-400 mb-3 uppercase tracking-wider">
-                <MapPin className="w-5 h-5 inline mr-2" />
-                Property Address
+          {/* Success feedback */}
+          {showSuccess && (
+            <div className="mb-4 rounded border border-green-500 bg-green-900/30 p-3 text-green-300 font-mono">
+              Lead sent successfully! We’ll be in touch soon.
+            </div>
+          )}
+
+          {/* Error feedback */}
+          {errorMsg && (
+            <div className="mb-4 rounded border border-red-500 bg-red-900/40 p-3 text-red-300 font-mono">
+              {errorMsg}
+            </div>
+          )}
+
+          {/* Form */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="md:col-span-2">
+              <label className="block text-lg font-bold text-cyan-300 mb-2 uppercase tracking-wider">
+                <MapPin className="w-5 h-5 inline mr-2" /> Property Address
               </label>
               <input
-                type="text"
                 name="propertyAddress"
                 value={formData.propertyAddress}
                 onChange={handleInputChange}
-                placeholder="Enter property location..."
-                className="w-full px-4 py-3 bg-black border border-cyan-400 rounded-md text-cyan-400 placeholder-cyan-600 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 font-mono"
+                placeholder="123 Main St, City, ST"
+                className="w-full px-4 py-3 bg-black border border-cyan-400 rounded-md text-cyan-200 placeholder-cyan-700 focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 font-mono"
               />
             </div>
 
-            {/* Photos Section */}
-            <div className="bg-black/90 border border-green-400 rounded-lg p-4 shadow-lg shadow-green-400/30 mb-6">
-              <label className="block text-lg font-bold text-green-400 mb-3 uppercase tracking-wider">
-                <Camera className="w-5 h-5 inline mr-2" />
-                Property Surveillance Images
+            <div>
+              <label className="block text-lg font-bold text-purple-400 mb-2 uppercase tracking-wider">
+                <User className="w-5 h-5 inline mr-2" /> Your Name
               </label>
-              
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
-                {photos.map(photo => (
-                  <div key={photo.id} className="relative group">
-                    <img 
-                      src={photo.preview} 
-                      alt="Property" 
-                      className="w-full h-32 object-cover rounded-lg border-2 border-green-400"
-                    />
-                    <button
-                      onClick={() => removePhoto(photo.id)}
-                      className="absolute top-2 right-2 bg-red-600 rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  </div>
-                ))}
-              </div>
-              
               <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                multiple
-                onChange={handlePhotoCapture}
-                className="hidden"
+                name="leadName"
+                value={formData.leadName}
+                onChange={handleInputChange}
+                placeholder="Jane Doe"
+                className="w-full px-4 py-3 bg-black border border-purple-400 rounded-md text-purple-200 placeholder-purple-700 focus:ring-2 focus:ring-purple-400 focus:border-purple-400 font-mono"
               />
-              
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full py-3 border-2 border-green-400 rounded-lg text-green-400 font-bold hover:bg-green-400 hover:text-black transition-all uppercase tracking-wider"
-              >
-                + Capture Images
-              </button>
             </div>
 
-            {/* Lead Information */}
-            <div className="bg-black/90 border border-blue-400 rounded-lg p-4 shadow-lg shadow-blue-400/30 mb-6">
-              <label className="block text-lg font-bold text-blue-400 mb-3 uppercase tracking-wider">
-                <User className="w-5 h-5 inline mr-2" />
-                Lead Intelligence
-              </label>
-              <div className="space-y-3">
-                <input
-                  type="text"
-                  name="leadName"
-                  value={formData.leadName}
-                  onChange={handleInputChange}
-                  placeholder="Target name..."
-                  className="w-full px-4 py-3 bg-black border border-blue-400 rounded-md text-blue-400 placeholder-blue-600 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 font-mono"
-                />
-                <div className="grid md:grid-cols-2 gap-3">
-                  <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-blue-400" />
-                    <input
-                      type="tel"
-                      name="leadPhone"
-                      value={formData.leadPhone}
-                      onChange={handleInputChange}
-                      placeholder="Phone signal..."
-                      className="w-full pl-12 pr-4 py-3 bg-black border border-blue-400 rounded-md text-blue-400 placeholder-blue-600 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 font-mono"
-                    />
-                  </div>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-blue-400" />
-                    <input
-                      type="email"
-                      name="leadEmail"
-                      value={formData.leadEmail}
-                      onChange={handleInputChange}
-                      placeholder="Email coordinates..."
-                      className="w-full pl-12 pr-4 py-3 bg-black border border-blue-400 rounded-md text-blue-400 placeholder-blue-600 focus:ring-2 focus:ring-blue-400 focus:border-blue-400 font-mono"
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Asking Price */}
-            <div className="bg-black/90 border border-yellow-400 rounded-lg p-4 shadow-lg shadow-yellow-400/30 mb-6">
-              <label className="block text-lg font-bold text-yellow-400 mb-3 uppercase tracking-wider">
-                <DollarSign className="w-5 h-5 inline mr-2" />
-                Asking Price
+            <div>
+              <label className="block text-lg font-bold text-emerald-400 mb-2 uppercase tracking-wider">
+                <Phone className="w-5 h-5 inline mr-2" /> Phone
               </label>
               <input
-                type="text"
+                name="leadPhone"
+                value={formData.leadPhone}
+                onChange={handleInputChange}
+                placeholder="(555) 555-5555"
+                className="w-full px-4 py-3 bg-black border border-emerald-400 rounded-md text-emerald-200 placeholder-emerald-700 focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-lg font-bold text-sky-400 mb-2 uppercase tracking-wider">
+                <Mail className="w-5 h-5 inline mr-2" /> Email
+              </label>
+              <input
+                name="leadEmail"
+                value={formData.leadEmail}
+                onChange={handleInputChange}
+                placeholder="you@example.com"
+                className="w-full px-4 py-3 bg-black border border-sky-400 rounded-md text-sky-200 placeholder-sky-700 focus:ring-2 focus:ring-sky-400 focus:border-sky-400 font-mono"
+              />
+            </div>
+
+            <div>
+              <label className="block text-lg font-bold text-amber-400 mb-2 uppercase tracking-wider">
+                <DollarSign className="w-5 h-5 inline mr-2" /> Asking Price
+              </label>
+              <input
                 name="askingPrice"
                 value={formData.askingPrice}
                 onChange={handleInputChange}
-                placeholder="Financial value..."
-                className="w-full px-4 py-3 bg-black border border-yellow-400 rounded-md text-yellow-400 placeholder-yellow-600 focus:ring-2 focus:ring-yellow-400 focus:border-yellow-400 font-mono"
+                placeholder="$250,000"
+                className="w-full px-4 py-3 bg-black border border-amber-400 rounded-md text-amber-200 placeholder-amber-700 focus:ring-2 focus:ring-amber-400 focus:border-amber-400 font-mono"
               />
             </div>
 
-            {/* Situation */}
-            <div className="bg-black/90 border border-red-400 rounded-lg p-4 shadow-lg shadow-red-400/30 mb-6">
-              <label className="block text-lg font-bold text-red-400 mb-3 uppercase tracking-wider">
-                <AlertTriangle className="w-5 h-5 inline mr-2" />
-                Situation Analysis
+            <div className="md:col-span-2">
+              <label className="block text-lg font-bold text-red-400 mb-2 uppercase tracking-wider">
+                <AlertTriangle className="w-5 h-5 inline mr-2" /> Situation
               </label>
               <textarea
                 name="situation"
@@ -241,11 +241,9 @@ const PropertyLeadApp = () => {
               />
             </div>
 
-            {/* Optional Notes */}
-            <div className="bg-black/90 border border-purple-400 rounded-lg p-4 shadow-lg shadow-purple-400/30 mb-6">
+            <div className="md:col-span-2">
               <label className="block text-lg font-bold text-purple-400 mb-3 uppercase tracking-wider">
-                <FileText className="w-5 h-5 inline mr-2" />
-                Additional Intelligence
+                <FileText className="w-5 h-5 inline mr-2" /> Additional Intelligence
               </label>
               <textarea
                 name="optionalNotes"
@@ -257,30 +255,55 @@ const PropertyLeadApp = () => {
               />
             </div>
 
-            {/* Submit Button */}
-            <button
-              type="button"
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className={`w-full py-6 rounded-lg font-bold text-xl text-white transition-all transform hover:scale-105 border-2 shadow-lg uppercase tracking-wider ${
-                isSubmitting
-                  ? 'bg-gray-600 cursor-not-allowed border-gray-500'
-                  : 'bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 border-cyan-400 hover:shadow-cyan-400/50 shadow-cyan-400/30'
-              }`}
-            >
-              {isSubmitting ? (
-                <div className="flex items-center justify-center space-x-3">
-                  <div className="animate-spin rounded-full h-8 w-8 border-4 border-white border-t-transparent"></div>
-                  <span>TRANSMITTING DATA...</span>
-                </div>
-              ) : (
-                <div className="flex items-center justify-center space-x-3">
-                  <Send className="w-8 h-8" />
-                  <span>SEND TO JOSH</span>
-                </div>
-              )}
-            </button>
+            {/* Photos */}
+            <div className="md:col-span-2">
+              <label className="block text-lg font-bold text-cyan-400 mb-2 uppercase tracking-wider">
+                <Camera className="w-5 h-5 inline mr-2" /> Photos (optional)
+              </label>
+              <div className="flex flex-wrap gap-3 mb-3">
+                {photos.map(p => (
+                  <div key={p.id} className="relative w-24 h-24 border border-cyan-400 rounded overflow-hidden">
+                    <img className="object-cover w-full h-full" src={p.preview} alt="preview" />
+                    <button type="button" onClick={() => removePhoto(p.id)} className="absolute top-1 right-1 bg-black/70 rounded p-1">
+                      <X className="w-4 h-4 text-red-400" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handlePhotoCapture}
+                className="block w-full text-sm text-cyan-300 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-cyan-900/40 file:text-cyan-300 hover:file:bg-cyan-900/60"
+              />
+            </div>
           </div>
+
+          {/* Submit Button */}
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={isSubmitting}
+            className={`w-full mt-6 py-6 rounded-lg font-bold text-xl text-white transition-all transform hover:scale-105 border-2 shadow-lg uppercase tracking-wider ${
+              isSubmitting
+                ? 'bg-gray-600 cursor-not-allowed border-gray-500'
+                : 'bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600 border-cyan-400 hover:shadow-cyan-400/50 shadow-cyan-400/30'
+            }`}
+          >
+            {isSubmitting ? (
+              <div className="flex items-center justify-center space-x-3">
+                <div className="animate-spin rounded-full h-8 w-8 border-4 border-white border-t-transparent"></div>
+                TRANSMITTING DATA...
+              </div>
+            ) : (
+              <div className="flex items-center justify-center space-x-3">
+                <Send className="w-8 h-8" />
+                SEND TO JOSH
+              </div>
+            )}
+          </button>
         </div>
       </div>
     </div>
